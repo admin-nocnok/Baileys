@@ -37,12 +37,18 @@ export function buildAckStanza(node: BinaryNode, errorCode?: number, meId?: stri
 	}
 
 	// WA Web WAWebHandleMsgSendAck.sendAck/sendNack always include `from` for message-class ACKs.
-	// The identity has to match how the stanza addressed us: acking a LID-addressed message with
-	// the PN makes the server reject the ACK and tear down the stream with
-	// <stream:error><ack class='message' .../></stream:error>. Same rule the socket already
+	// The identity has to match how the stanza addressed us -- the same rule the socket already
 	// applies elsewhere (`from: isLid ? me.lid : me.id` when replying to a LID chat); this path
 	// was the one still hardcoding the PN. Addressing is detected the same way
 	// extractAddressingContext does it, inlined to keep this function pure.
+	//
+	// This was originally written believing it caused the
+	// <stream:error><ack class='message' .../></stream:error> teardowns. Measured against a canary
+	// running this patch, it does not: those drops continued at the same per-instance rate as
+	// unpatched nodes, on a ~3000 s metronome. They are a separate, still-undiagnosed problem --
+	// and note that neither the "ack" nor the 500 in that error comes from the server, they are
+	// getErrorCodeFromStreamError falling back to the first child's tag and to badSession. This
+	// change stands on addressing consistency alone.
 	if (tag === 'message' && meId) {
 		const sender = attrs.participant || attrs.from
 		const isLidAddressed = attrs.addressing_mode
