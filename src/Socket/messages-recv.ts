@@ -54,6 +54,7 @@ import {
 	xmppSignedPreKey
 } from '../Utils'
 import { makeMutex } from '../Utils/make-mutex'
+import { makeOfflineBatchRequester } from '../Utils/offline-batch-requester'
 import { makeOfflineNodeProcessor, type MessageType } from '../Utils/offline-node-processor'
 import { buildAckStanza } from '../Utils/stanza-ack'
 import {
@@ -106,6 +107,8 @@ const ENFORCEMENT_TYPE_VALUES = new Set<string>(Object.values(ReachoutTimelockEn
 function isValidEnforcementType(value: string | undefined): value is ReachoutTimelockEnforcementType {
 	return typeof value === 'string' && ENFORCEMENT_TYPE_VALUES.has(value)
 }
+
+const MAX_OFFLINE_DRAIN = 50_000
 
 export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	const { logger, retryRequestDelayMs, maxMsgRetryCount, getMessage, shouldIgnoreJid, enableAutoSessionRecreation } =
@@ -1948,6 +1951,18 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		}
 	}
 
+	const offlineBatchRequester = makeOfflineBatchRequester({
+		batchCount: config.offlineBatchCount,
+		maxDrain: MAX_OFFLINE_DRAIN,
+		sendBatch: count =>
+			sendNode({
+				tag: 'ib',
+				attrs: {},
+				content: [{ tag: 'offline_batch', attrs: { count: String(count) } }]
+			}),
+		logger
+	})
+
 	const offlineNodeProcessor = makeOfflineNodeProcessor(
 		new Map<MessageType, (node: BinaryNode) => Promise<void>>([
 			['message', handleMessage],
@@ -1990,6 +2005,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 
 		if (isOffline) {
 			offlineNodeProcessor.enqueue(type, node)
+			offlineBatchRequester.onNode()
 		} else {
 			await processNodeWithBuffer(node, identifier, exec)
 		}
