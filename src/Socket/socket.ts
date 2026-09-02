@@ -1004,7 +1004,10 @@ export const makeSocket = (config: SocketConfig) => {
 	})
 
 	ws.on('CB:ib,,offline_preview', async (node: BinaryNode) => {
-		logger.info('offline preview received', JSON.stringify(node))
+		// pino reads the first argument as the message, so the node was passed as an
+		// interpolation value with no placeholder to land in and got dropped. The count it
+		// carries is the only place the client learns how much is actually pending.
+		logger.info({ node }, 'offline preview received')
 		await sendNode({
 			tag: 'ib',
 			attrs: {},
