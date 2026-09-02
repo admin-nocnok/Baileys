@@ -79,6 +79,9 @@ export const DEFAULT_CONNECTION_CONFIG: SocketConfig = {
 		return syncType !== proto.HistorySync.HistorySyncType.FULL
 	},
 	shouldIgnoreJid: () => false,
+	// WhatsApp announces the pending count in offline_preview and it can run to five figures;
+	// this is how much of it we ask for at once, and the client asks only once per connection.
+	offlineBatchCount: 100,
 	linkPreviewImageThumbnailWidth: 192,
 	transactionOpts: { maxCommitRetries: 10, delayBetweenTriesMs: 3000 },
 	generateHighQualityLinkPreview: false,

@@ -1007,11 +1007,11 @@ export const makeSocket = (config: SocketConfig) => {
 		// pino reads the first argument as the message, so the node was passed as an
 		// interpolation value with no placeholder to land in and got dropped. The count it
 		// carries is the only place the client learns how much is actually pending.
-		logger.info({ node }, 'offline preview received')
+		logger.info({ node, offlineBatchCount: config.offlineBatchCount }, 'offline preview received')
 		await sendNode({
 			tag: 'ib',
 			attrs: {},
-			content: [{ tag: 'offline_batch', attrs: { count: '100' } }]
+			content: [{ tag: 'offline_batch', attrs: { count: String(config.offlineBatchCount) } }]
 		})
 	})
 
