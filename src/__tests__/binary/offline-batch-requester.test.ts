@@ -72,6 +72,19 @@ describe('Offline batch requester', () => {
 		expect(asked).toHaveLength(0)
 	})
 
+	it('reopens the drain when a new preview announces another queue', () => {
+		const { asked, requester } = makeRequester()
+
+		requester.onComplete()
+		expect(requester.stats().stopped).toBe(true)
+
+		requester.onPreview()
+		expect(requester.stats().stopped).toBe(false)
+
+		jest.advanceTimersByTime(10_000)
+		expect(asked).toEqual([100])
+	})
+
 	it('stops at the ceiling rather than looping forever', () => {
 		const { asked, requester } = makeRequester({ batchCount: 10, maxDrain: 30 })
 

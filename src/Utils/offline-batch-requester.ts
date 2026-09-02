@@ -84,7 +84,15 @@ export function makeOfflineBatchRequester({
 
 	return {
 		/** the preview arrived and the first batch was already asked for elsewhere */
-		onPreview: armIdle,
+		onPreview: () => {
+			// A fresh preview announces another queue, so a drain that already reached its
+			// completion must not stay closed -- otherwise the second queue sits there until the
+			// session is recycled, which is the same silent halt this whole thing exists to avoid.
+			// `drained` stays cumulative on purpose, so the ceiling still bounds the session.
+			stopped = false
+			seenInBatch = 0
+			armIdle()
+		},
 		onNode: () => {
 			if (stopped) {
 				return
