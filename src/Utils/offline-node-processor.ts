@@ -11,6 +11,8 @@ export type OfflineNodeProcessorDeps = {
 	isWsOpen: () => boolean
 	onUnexpectedError: (error: Error, msg: string) => void
 	yieldToEventLoop: () => Promise<void>
+	/** called with however many nodes were still queued when the socket closed */
+	onNodesPending?: (count: number) => void
 }
 
 /**
@@ -60,11 +62,23 @@ export function makeOfflineNodeProcessor(
 				}
 			}
 
+			// The loop exits on a closed socket with whatever is still queued left in place, to be
+			// picked up when the next enqueue restarts it. Nothing is lost, but until then those
+			// nodes are unhandled and therefore unacked, so the server keeps offering them. Report
+			// the depth: a queue that is deep here is the drain outrunning the handler.
+			if (nodes.length) {
+				deps.onNodesPending?.(nodes.length)
+			}
+
 			isProcessing = false
 		}
 
 		promise().catch(error => deps.onUnexpectedError(error, 'processing offline nodes'))
 	}
 
-	return { enqueue }
+	return {
+		enqueue,
+		/** how many nodes are waiting to be handled -- drives the drain's backpressure */
+		pending: () => nodes.length
+	}
 }
