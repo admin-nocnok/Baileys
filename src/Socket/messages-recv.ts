@@ -109,6 +109,9 @@ function isValidEnforcementType(value: string | undefined): value is ReachoutTim
 }
 
 const MAX_OFFLINE_DRAIN = 50_000
+// a short batch means nothing on its own: the server paces delivery too, so wait this long
+// without an arrival before asking again
+const OFFLINE_IDLE_MS = 10_000
 
 export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	const { logger, retryRequestDelayMs, maxMsgRetryCount, getMessage, shouldIgnoreJid, enableAutoSessionRecreation } =
@@ -1954,14 +1957,22 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	const offlineBatchRequester = makeOfflineBatchRequester({
 		batchCount: config.offlineBatchCount,
 		maxDrain: MAX_OFFLINE_DRAIN,
+		idleMs: OFFLINE_IDLE_MS,
 		sendBatch: count =>
 			sendNode({
 				tag: 'ib',
 				attrs: {},
 				content: [{ tag: 'offline_batch', attrs: { count: String(count) } }]
 			}),
-		logger
+		// the socket's own jid, so a drain can be attributed to an instance in the logs
+		logger: {
+			info: (obj, msg) => logger.info({ ...obj, me: authState.creds.me?.id }, msg),
+			warn: (obj, msg) => logger.warn({ ...obj, me: authState.creds.me?.id }, msg)
+		}
 	})
+
+	ws.on('CB:ib,,offline_preview', () => offlineBatchRequester.onPreview())
+	ws.on('CB:ib,,offline', () => offlineBatchRequester.onComplete())
 
 	const offlineNodeProcessor = makeOfflineNodeProcessor(
 		new Map<MessageType, (node: BinaryNode) => Promise<void>>([
