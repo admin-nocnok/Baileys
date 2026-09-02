@@ -115,6 +115,8 @@ export type SocketConfig = {
 	 * Messages from that jid will also not be decrypted
 	 * */
 	shouldIgnoreJid: (jid: string) => boolean | undefined
+	/** how many offline messages to ask WhatsApp for per offline_batch request */
+	offlineBatchCount: number
 
 	/**
 	 * Optionally patch the message before sending out
