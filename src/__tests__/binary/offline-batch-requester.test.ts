@@ -3,12 +3,19 @@ import { makeOfflineBatchRequester } from '../../Utils/offline-batch-requester'
 
 const silentLogger = { info: () => {}, warn: () => {} }
 
-const makeRequester = (over: Partial<{ batchCount: number; maxDrain: number; idleMs: number }> = {}) => {
+const makeRequester = (
+	over: Partial<{ batchCount: number; maxDrain: number; idleMs: number; maxPending: number }> = {}
+) => {
 	const asked: number[] = []
+	// tests drive the handler's backlog by hand
+	const backlog = { size: 0 }
 	const requester = makeOfflineBatchRequester({
 		batchCount: 100,
 		maxDrain: 50_000,
 		idleMs: 10_000,
+		maxPending: 200,
+		backpressureMs: 250,
+		pendingWork: () => backlog.size,
 		sendBatch: async count => {
 			asked.push(count)
 		},
@@ -16,7 +23,7 @@ const makeRequester = (over: Partial<{ batchCount: number; maxDrain: number; idl
 		...over
 	})
 
-	return { asked, requester }
+	return { asked, requester, backlog }
 }
 
 describe('Offline batch requester', () => {
@@ -82,6 +89,31 @@ describe('Offline batch requester', () => {
 		expect(requester.stats().stopped).toBe(false)
 
 		jest.advanceTimersByTime(10_000)
+		expect(asked).toEqual([100])
+	})
+
+	// Arrival is not progress: the socket delivers far faster than items are handled, so pacing on
+	// arrival pulled whole queues into memory. Tens of thousands of items per instance, against 250
+	// instances on a worker, is how a node reaches 2.9 GB.
+	it('stops asking while the handler is behind, and resumes once it catches up', () => {
+		const { asked, requester, backlog } = makeRequester()
+
+		backlog.size = 500
+
+		for (let i = 0; i < 100; i++) {
+			requester.onNode()
+		}
+
+		expect(asked).toHaveLength(0)
+
+		jest.advanceTimersByTime(250)
+		expect(asked).toHaveLength(0)
+
+		jest.advanceTimersByTime(10_000)
+		expect(asked).toHaveLength(0)
+
+		backlog.size = 0
+		jest.advanceTimersByTime(250)
 		expect(asked).toEqual([100])
 	})
 

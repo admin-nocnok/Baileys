@@ -10,6 +10,12 @@ export type OfflineBatchRequesterDeps = {
 	maxDrain: number
 	/** how long without an arriving item before assuming the batch is over and asking again */
 	idleMs: number
+	/** stop asking while this many items are still waiting to be handled */
+	maxPending: number
+	/** how long to wait before re-checking whether the handler caught up */
+	backpressureMs: number
+	/** items received but not yet handled */
+	pendingWork: () => number
 	sendBatch: (count: number) => Promise<void>
 	logger: OfflineBatchLogger
 }
@@ -31,6 +37,9 @@ export function makeOfflineBatchRequester({
 	batchCount,
 	maxDrain,
 	idleMs,
+	maxPending,
+	backpressureMs,
+	pendingWork,
 	sendBatch,
 	logger
 }: OfflineBatchRequesterDeps) {
@@ -73,6 +82,17 @@ export function makeOfflineBatchRequester({
 
 		if (drained >= maxDrain) {
 			stop('drain ceiling reached')
+			return
+		}
+
+		// Arrival is not progress: items land in an in-memory queue and are handled one at a time,
+		// decrypt and persist included, which is far slower than the socket delivers them. Pacing
+		// on arrival pulled entire queues into memory -- tens of thousands of items per instance,
+		// against 250 instances on a worker. Ask for more only once the handler has caught up.
+		if (pendingWork() >= maxPending) {
+			clearIdle()
+			idleTimer = setTimeout(() => request('handler caught up'), backpressureMs)
+			idleTimer.unref?.()
 			return
 		}
 
