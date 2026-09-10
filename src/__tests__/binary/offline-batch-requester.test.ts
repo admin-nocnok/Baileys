@@ -117,6 +117,70 @@ describe('Offline batch requester', () => {
 		expect(asked).toEqual([100])
 	})
 
+	// The regression this exists for: an instance migrated off worker-04 on 2026-09-10 and the
+	// drain kept asking against the closed socket for over three hours, 6 attempts a minute, every
+	// one of them failing with 'Connection Closed'. maxDrain does not catch it -- `drained` only
+	// moves when items arrive, so with a dead socket it stays frozen and the ceiling never hits.
+	it('stops when the send fails instead of retrying against a dead socket', async () => {
+		const asked: number[] = []
+		const requester = makeOfflineBatchRequester({
+			batchCount: 100,
+			maxDrain: 50_000,
+			idleMs: 10_000,
+			maxPending: 200,
+			backpressureMs: 250,
+			pendingWork: () => 0,
+			sendBatch: async count => {
+				asked.push(count)
+				throw new Error('Connection Closed')
+			},
+			logger: silentLogger
+		})
+
+		requester.onPreview()
+		jest.advanceTimersByTime(10_000)
+		expect(asked).toEqual([100])
+
+		// let the rejected promise settle so the catch can stop the drain
+		await Promise.resolve()
+		expect(requester.stats().stopped).toBe(true)
+
+		// no further attempts, however long the timers run
+		jest.advanceTimersByTime(60_000)
+		expect(asked).toEqual([100])
+	})
+
+	it('a fresh preview revives a drain stopped by a failed send', async () => {
+		let failing = true
+		const asked: number[] = []
+		const requester = makeOfflineBatchRequester({
+			batchCount: 100,
+			maxDrain: 50_000,
+			idleMs: 10_000,
+			maxPending: 200,
+			backpressureMs: 250,
+			pendingWork: () => 0,
+			sendBatch: async count => {
+				asked.push(count)
+				if (failing) {
+					throw new Error('Connection Closed')
+				}
+			},
+			logger: silentLogger
+		})
+
+		requester.onPreview()
+		jest.advanceTimersByTime(10_000)
+		await Promise.resolve()
+		expect(requester.stats().stopped).toBe(true)
+
+		failing = false
+		requester.onPreview()
+		jest.advanceTimersByTime(10_000)
+		expect(asked).toEqual([100, 100])
+		expect(requester.stats().stopped).toBe(false)
+	})
+
 	it('stops at the ceiling rather than looping forever', () => {
 		const { asked, requester } = makeRequester({ batchCount: 10, maxDrain: 30 })
 
