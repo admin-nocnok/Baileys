@@ -98,7 +98,17 @@ export function makeOfflineBatchRequester({
 
 		seenInBatch = 0
 		logger.info({ drained, reason }, 'requesting offline batch')
-		sendBatch(batchCount).catch(err => logger.warn({ err }, 'failed to request next offline batch'))
+		// A send that rejects means the socket is gone, and a gone socket has nothing left to
+		// drain. Logging and re-arming instead kept the timer firing against a dead socket every
+		// idleMs until the container recycled -- worker-04 did it for over three hours on
+		// 2026-09-10 after an instance migrated away. The maxDrain ceiling does not cover this:
+		// `drained` only moves in onNode(), so with nothing arriving it stays frozen and the
+		// ceiling is never reached. stop() clears the timer armIdle() is about to set, since this
+		// catch runs a microtask later.
+		sendBatch(batchCount).catch(err => {
+			logger.warn({ err }, 'failed to request next offline batch')
+			stop('send failed')
+		})
 		armIdle()
 	}
 
