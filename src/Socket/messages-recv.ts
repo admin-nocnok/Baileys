@@ -114,6 +114,9 @@ const MAX_OFFLINE_DRAIN = 50_000
 const OFFLINE_IDLE_MS = 10_000
 // how long to wait before re-checking whether the handler drained enough to ask for more
 const OFFLINE_BACKPRESSURE_MS = 250
+// 30 x OFFLINE_IDLE_MS = five minutes of silence before giving up. A healthy drain closes in
+// seconds, so this only catches a server that stopped answering altogether.
+const MAX_OFFLINE_IDLE_RETRIES = 30
 
 export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	const { logger, retryRequestDelayMs, maxMsgRetryCount, getMessage, shouldIgnoreJid, enableAutoSessionRecreation } =
@@ -1976,6 +1979,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		batchCount: config.offlineBatchCount,
 		maxDrain: MAX_OFFLINE_DRAIN,
 		idleMs: OFFLINE_IDLE_MS,
+		maxIdleRetries: MAX_OFFLINE_IDLE_RETRIES,
 		maxPending: config.offlineBatchCount * 2,
 		backpressureMs: OFFLINE_BACKPRESSURE_MS,
 		pendingWork: () => offlineNodeProcessor.pending(),

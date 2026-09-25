@@ -1,3 +1,6 @@
+/** 30 x a 10 s idle is five minutes of silence; a healthy drain closes in seconds */
+const DEFAULT_MAX_IDLE_RETRIES = 30
+
 export type OfflineBatchLogger = {
 	info: (obj: object, msg: string) => void
 	warn: (obj: object, msg: string) => void
@@ -10,6 +13,8 @@ export type OfflineBatchRequesterDeps = {
 	maxDrain: number
 	/** how long without an arriving item before assuming the batch is over and asking again */
 	idleMs: number
+	/** consecutive idle retries that bring nothing in before giving up on a silent server */
+	maxIdleRetries?: number
 	/** stop asking while this many items are still waiting to be handled */
 	maxPending: number
 	/** how long to wait before re-checking whether the handler caught up */
@@ -37,6 +42,7 @@ export function makeOfflineBatchRequester({
 	batchCount,
 	maxDrain,
 	idleMs,
+	maxIdleRetries = DEFAULT_MAX_IDLE_RETRIES,
 	maxPending,
 	backpressureMs,
 	pendingWork,
@@ -46,6 +52,7 @@ export function makeOfflineBatchRequester({
 	let seenInBatch = 0
 	let drained = 0
 	let stopped = false
+	let idleRetries = 0
 	let idleTimer: NodeJS.Timeout | undefined
 
 	const clearIdle = () => {
@@ -71,7 +78,19 @@ export function makeOfflineBatchRequester({
 			return
 		}
 
-		idleTimer = setTimeout(() => request('idle, no completion signal yet'), idleMs)
+		// A live socket whose server answers neither with items nor with CB:ib,,offline is invisible
+		// to every other exit: sendBatch resolves so the catch never runs, and maxDrain only moves in
+		// onNode(). Before this, one such session asked every idleMs for 55 minutes and others for
+		// over four hours, until a reconnect rebuilt the socket. The streak resets in onNode(), so
+		// only a server that sends nothing at all trips this.
+		idleTimer = setTimeout(() => {
+			if (++idleRetries >= maxIdleRetries) {
+				stop('idle ceiling reached, server never answered')
+				return
+			}
+
+			request('idle, no completion signal yet')
+		}, idleMs)
 		idleTimer.unref?.()
 	}
 
@@ -121,6 +140,7 @@ export function makeOfflineBatchRequester({
 			// `drained` stays cumulative on purpose, so the ceiling still bounds the session.
 			stopped = false
 			seenInBatch = 0
+			idleRetries = 0
 			armIdle()
 		},
 		onNode: () => {
@@ -130,6 +150,8 @@ export function makeOfflineBatchRequester({
 
 			seenInBatch++
 			drained++
+			// an arrival is the server answering, whatever the pace
+			idleRetries = 0
 
 			if (seenInBatch >= batchCount) {
 				request('batch consumed')
@@ -139,6 +161,6 @@ export function makeOfflineBatchRequester({
 		},
 		/** CB:ib,,offline -- the only thing that actually ends the drain */
 		onComplete: () => stop('server signalled completion'),
-		stats: () => ({ drained, seenInBatch, stopped })
+		stats: () => ({ drained, seenInBatch, stopped, idleRetries })
 	}
 }

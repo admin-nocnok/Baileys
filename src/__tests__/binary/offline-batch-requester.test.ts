@@ -191,4 +191,91 @@ describe('Offline batch requester', () => {
 		expect(asked).toEqual([10, 10])
 		expect(requester.stats().stopped).toBe(true)
 	})
+
+	describe('a server that answers nothing at all', () => {
+		// Every other exit is blind to this: the socket is alive so sendBatch resolves and its catch
+		// never runs, and maxDrain only moves in onNode(). One session asked every idleMs for 55
+		// minutes on 2026-09-25, and others for over four hours, until a reconnect rebuilt the socket.
+		const silent = (maxIdleRetries?: number) => {
+			const asked: number[] = []
+			const ended: string[] = []
+			const requester = makeOfflineBatchRequester({
+				batchCount: 100,
+				maxDrain: 50_000,
+				idleMs: 10_000,
+				maxIdleRetries,
+				maxPending: 200,
+				backpressureMs: 250,
+				pendingWork: () => 0,
+				sendBatch: async count => {
+					asked.push(count)
+				},
+				logger: {
+					info: (obj, msg) => {
+						if (msg === 'offline drain finished') {
+							ended.push((obj as { reason: string }).reason)
+						}
+					},
+					warn: () => {}
+				}
+			})
+			return { requester, asked, ended }
+		}
+
+		it('gives up after maxIdleRetries and says why', () => {
+			const { requester, ended } = silent(3)
+			requester.onPreview()
+
+			jest.advanceTimersByTime(10_000 * 10)
+
+			expect(ended).toEqual(['idle ceiling reached, server never answered'])
+			expect(requester.stats().stopped).toBe(true)
+		})
+
+		it('asks no more once it has given up', () => {
+			const { requester, asked } = silent(3)
+			requester.onPreview()
+			jest.advanceTimersByTime(10_000 * 10)
+			const atCeiling = asked.length
+
+			jest.advanceTimersByTime(10_000 * 30)
+
+			expect(asked).toHaveLength(atCeiling)
+		})
+
+		it('an arrival resets the streak, so a merely slow server is not cut off', () => {
+			// Pacing is normal and must not read as silence.
+			const { requester, ended } = silent(3)
+			requester.onPreview()
+
+			for (let i = 0; i < 20; i++) {
+				jest.advanceTimersByTime(10_000 * 2)
+				requester.onNode()
+			}
+
+			expect(ended).toHaveLength(0)
+			expect(requester.stats().stopped).toBe(false)
+		})
+
+		it('a fresh preview clears a streak left by the previous queue', () => {
+			const { requester } = silent(3)
+			requester.onPreview()
+			jest.advanceTimersByTime(10_000 * 2)
+			expect(requester.stats().idleRetries).toBe(2)
+
+			requester.onPreview()
+
+			expect(requester.stats().idleRetries).toBe(0)
+		})
+
+		it('defaults the ceiling when the caller omits it', () => {
+			// Omitting it must not mean "unbounded" -- that is the bug this exists for.
+			const { requester, ended } = silent(undefined)
+			requester.onPreview()
+
+			jest.advanceTimersByTime(10_000 * 40)
+
+			expect(ended).toEqual(['idle ceiling reached, server never answered'])
+		})
+	})
 })
