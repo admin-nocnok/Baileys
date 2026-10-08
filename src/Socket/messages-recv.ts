@@ -1738,13 +1738,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 							}
 
 							acked = true
-							// A NACK on a status the server keeps re-delivering it on every reconnect, and the
-							// server answers the NACK with <stream:error><ack class="status"/> that drops the socket.
-							if (isJidStatusBroadcast(msg.key.remoteJid!)) {
-								await sendMessageAck(node)
-							} else {
-								await sendMessageAck(node, NACK_REASONS.UnhandledError)
-							}
+							await sendMessageAck(node, NACK_REASONS.UnhandledError)
 						})
 					}
 				} else {
@@ -2058,6 +2052,12 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	})
 	ws.on('CB:ack,class:message', (node: BinaryNode) => {
 		handleBadAck(node).catch(error => onUnexpectedError(error, 'handling bad ack'))
+	})
+
+	// WhatsApp now delivers statuses as <status> stanzas. Unacked, the server answers with
+	// <stream:error><ack class="status"/>, drops the socket and re-delivers them on every reconnect.
+	ws.on('CB:status', (node: BinaryNode) => {
+		sendMessageAck(node).catch(ackErr => logger.error({ ackErr }, 'failed to ack status'))
 	})
 
 	ev.on('call', async ([call]) => {
