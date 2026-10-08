@@ -2054,6 +2054,12 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		handleBadAck(node).catch(error => onUnexpectedError(error, 'handling bad ack'))
 	})
 
+	// WhatsApp now delivers statuses as <status> stanzas. Unacked, the server answers with
+	// <stream:error><ack class="status"/>, drops the socket and re-delivers them on every reconnect.
+	ws.on('CB:status', (node: BinaryNode) => {
+		sendMessageAck(node).catch(ackErr => logger.error({ ackErr }, 'failed to ack status'))
+	})
+
 	ev.on('call', async ([call]) => {
 		if (!call) {
 			return

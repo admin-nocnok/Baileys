@@ -23,6 +23,28 @@ describe('buildAckStanza', () => {
 			})
 		})
 
+		it('should ack a status stanza with class status and without from', () => {
+			const node: BinaryNode = {
+				tag: 'status',
+				attrs: {
+					id: 'A51293329E7FCCF2B0F2D86AAADEFB39',
+					from: 'status@broadcast',
+					participant: '100046968213522@lid',
+					type: 'media'
+				}
+			}
+			expect(buildAckStanza(node, undefined, 'me@s.whatsapp.net', 'me@lid')).toEqual({
+				tag: 'ack',
+				attrs: {
+					id: 'A51293329E7FCCF2B0F2D86AAADEFB39',
+					to: 'status@broadcast',
+					class: 'status',
+					participant: '100046968213522@lid',
+					type: 'media'
+				}
+			})
+		})
+
 		it('should build ACK for receipt node', () => {
 			const node: BinaryNode = {
 				tag: 'receipt',
