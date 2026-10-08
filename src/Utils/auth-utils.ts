@@ -106,6 +106,10 @@ export function makeCacheableSignalKeyStore(
 	}
 }
 
+// One storage for the whole process, keyed by key store: on Node <= 22 every enabled AsyncLocalStorage runs on
+// every promise (lib/async_hooks.js storageHook.init), so one per socket made each await cost O(sockets ever opened).
+const txStorage = new AsyncLocalStorage<Map<object, TransactionContext>>()
+
 /**
  * Adds DB-like transaction capability to the SignalKeyStore
  * Uses AsyncLocalStorage for automatic context management
@@ -118,7 +122,8 @@ export const addTransactionCapability = (
 	logger: ILogger,
 	{ maxCommitRetries, delayBetweenTriesMs }: TransactionCapabilityOptions
 ): SignalKeyStoreWithTransaction => {
-	const txStorage = new AsyncLocalStorage<TransactionContext>()
+	const owner = {}
+	const currentTx = () => txStorage.getStore()?.get(owner)
 
 	// Queues for concurrency control (keyed by signal data type - bounded set)
 	const keyQueues = new Map<string, PQueue>()
@@ -182,7 +187,7 @@ export const addTransactionCapability = (
 	 * Check if currently in a transaction
 	 */
 	function isInTransaction(): boolean {
-		return !!txStorage.getStore()
+		return !!currentTx()
 	}
 
 	/**
@@ -216,7 +221,7 @@ export const addTransactionCapability = (
 
 	return {
 		get: async (type, ids) => {
-			const ctx = txStorage.getStore()
+			const ctx = currentTx()
 
 			if (!ctx) {
 				// No transaction - direct read without exclusive lock for concurrency
@@ -251,7 +256,7 @@ export const addTransactionCapability = (
 		},
 
 		set: async data => {
-			const ctx = txStorage.getStore()
+			const ctx = currentTx()
 
 			if (!ctx) {
 				// No transaction - direct write with queue protection
@@ -301,7 +306,7 @@ export const addTransactionCapability = (
 		isInTransaction,
 
 		transaction: async (work, key) => {
-			const existing = txStorage.getStore()
+			const existing = currentTx()
 
 			// Nested transaction - reuse existing context
 			if (existing) {
@@ -324,7 +329,7 @@ export const addTransactionCapability = (
 					logger.trace('entering transaction')
 
 					try {
-						const result = await txStorage.run(ctx, work)
+						const result = await txStorage.run(new Map(txStorage.getStore()).set(owner, ctx), work)
 
 						// Commit mutations
 						await commitWithRetry(ctx.mutations)
