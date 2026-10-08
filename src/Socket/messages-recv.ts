@@ -1738,7 +1738,13 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 							}
 
 							acked = true
-							await sendMessageAck(node, NACK_REASONS.UnhandledError)
+							// A NACK on a status the server keeps re-delivering it on every reconnect, and the
+							// server answers the NACK with <stream:error><ack class="status"/> that drops the socket.
+							if (isJidStatusBroadcast(msg.key.remoteJid!)) {
+								await sendMessageAck(node)
+							} else {
+								await sendMessageAck(node, NACK_REASONS.UnhandledError)
+							}
 						})
 					}
 				} else {
